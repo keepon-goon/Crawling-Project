@@ -1,3 +1,8 @@
+'''
+通过selenium库，模拟用户在浏览器的各种行为，来爬取数据。
+selenium可以打开HTML代码并进一步分析
+'''
+
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
