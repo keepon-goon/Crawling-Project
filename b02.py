@@ -97,8 +97,13 @@ def main():
     browser_login()
     session = get_Cookies_and_put_in_request()
     #点击叉号去除广告
-    browser.find_element(By.CSS_SELECTOR,'a[data-type="closePop"]').click()
-    logging.info('successfully click cross')
+    try:
+        wait = WebDriverWait(browser,60)
+        button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a.item[data-subjectid="10"]')))
+        browser.find_element(By.CSS_SELECTOR,'a[data-type="closePop"]').click()
+        logging.info('successfully click cross')
+    except TimeoutError:
+        logging.error('the cross can not loading in ten second')
     # 点击语文
     browser.find_element(By.CSS_SELECTOR, 'a.item[data-subjectid="10"]').click()
     logging.info('successfully click 语文')
