@@ -19,8 +19,8 @@ import time
 
 BASE_URL = 'https://zujuan.xkw.com/'
 LOGIN_URL = urljoin(BASE_URL, '/login')
-USERNAME = '18862028557'#197                 #13390680908#17365533605#18962033216
-PASSWORD = 'Dy032413'  # 1234@ABCD#12345@aaa#1234@ABCD#1234@abcd#Wytb@860920
+USERNAME = 'your username'
+PASSWORD = 'your password' 
 option = ChromeOptions()
 option.add_experimental_option('excludeSwitches',['enable-automation'])
 option.add_experimental_option('useAutomationExtension',False)
