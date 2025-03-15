@@ -10,15 +10,28 @@ from selenium import webdriver
 from urllib.parse import urljoin
 from selenium.webdriver.common.by import By
 from pyquery import PyQuery as pq
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver import ChromeOptions
 import requests
 import logging
 import time
 
 BASE_URL = 'https://zujuan.xkw.com/'
 LOGIN_URL = urljoin(BASE_URL, '/login')
-USERNAME = '13390680908'
-PASSWORD = '1234@ABCD'  # 1234@ABCD12345@aaa
-browser = webdriver.Chrome()
+USERNAME = '18862028557'#197                 #13390680908#17365533605#18962033216
+PASSWORD = 'Dy032413'  # 1234@ABCD#12345@aaa#1234@ABCD#1234@abcd#Wytb@860920
+option = ChromeOptions()
+option.add_experimental_option('excludeSwitches',['enable-automation'])
+option.add_experimental_option('useAutomationExtension',False)
+prefs = {
+    'credentials_enable_service': False,
+    'profile.password_manager_enabled': False
+}
+option.add_experimental_option('prefs', prefs)
+browser = webdriver.Chrome(options=option)
+browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument'
+                        ,{'source':'Object.defineProperty(navigator,"webdriver",{get:() => undefined})'})
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s  %(levelname)s:%(message)s')
 def match_data(detail_html):
@@ -99,8 +112,9 @@ def main():
     #点击叉号去除广告
     try:
         wait = WebDriverWait(browser,60)
-        button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a.item[data-subjectid="10"]')))
-        browser.find_element(By.CSS_SELECTOR,'a[data-type="closePop"]').click()
+        button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-type="closePop"]')))
+        # browser.find_element(By.CSS_SELECTOR,'a[data-type="closePop"]').click()
+        browser.execute_script('document.querySelector("a[data-type=\'closePop\']").click()')
         logging.info('successfully click cross')
     except TimeoutError:
         logging.error('the cross can not loading in ten second')
