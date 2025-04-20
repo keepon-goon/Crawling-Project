@@ -1,0 +1,248 @@
+'''
+借助selenium库模拟浏览器登录，获取Cookies后传给response请求，借助request.session类使每次
+request请求都携带Cookies。
+解决登录后，点击语文，获取主页面的HTML代码，关闭浏览器，从主页面HTMl代码中获取各个试卷页面的URL，
+利用获取的试卷页的URL爬取对应的HTML代码，借助CSS选择器匹配所需的数据并保存为JSON格式
+'''
+
+'''
+数据库结构：题库分类：科目，试题名称-----试题分类：试题名称，练习名称------练习文本：练习名称，练习
+文本，答案
+'''
+from selenium import webdriver
+from urllib.parse import urljoin
+from selenium.webdriver.common.by import By
+from pyquery import PyQuery as pq
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver import ChromeOptions
+import requests
+import logging
+import time
+import pymysql
+import re
+
+BASE_URL = 'https://zujuan.xkw.com/'
+LOGIN_URL = urljoin(BASE_URL, '/login')
+USERNAME = '18962033216'
+PASSWORD = 'Wytb@860920'
+option = ChromeOptions()
+option.add_experimental_option('excludeSwitches', ['enable-automation'])
+option.add_experimental_option('useAutomationExtension', False)
+prefs = {
+    'credentials_enable_service': False,
+    'profile.password_manager_enabled': False
+}
+option.add_experimental_option('prefs', prefs)
+browser = webdriver.Chrome(options=option)
+browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument'
+                        , {
+                            'source': 'Object.defineProperty(navigator,"webdriver",{get:() => undefined})'})
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s  %(levelname)s:%(message)s')
+
+
+def match_data(detail_html):
+    '''接收试卷页的HTML代码，匹配需要的数据返回'''
+    doc = pq(detail_html)
+    div = doc('div.qml_paper.ques-list')
+    return div.text()
+
+
+def scrape_page(url, session):
+    '''接收一个页面的URL，返回该页面的HTML代码'''
+    logging.info('scraping %s', url)
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        response = session.get(url, headers=headers)
+        if response.status_code == 200:
+            logging.info('get html successfully')
+            return response.text
+        logging.error('get invalid status_code %s when scrape %s',
+                      response.status_code, url)
+    except requests.RequestException:
+        logging.error('error occurred when scrape %s', url, exc_info=True)
+
+
+def parse_detail(html):
+    '''接受主页面的HTMl代码，以生成器的形式返回试卷页的url'''
+    doc = pq(html)
+    items = doc('a.info-title').items()  # 调用items方法得到一个生成器
+    if not items:
+        logging.info('empty list when using parse_detail')
+        return []
+    for item in items:
+        detail_part_url = item.attr('href')
+        detail_url = urljoin(BASE_URL, detail_part_url)
+        logging.info('get detail url %s', detail_url)
+        yield detail_url
+
+
+def browser_login():
+    '''模拟浏览器，点击登录，选择账号密码方式，输入数据，登录'''
+    browser.get(LOGIN_URL)
+    # 选择账号密码登录对应的按钮元素并点击
+    logging.info('clicking the account password login method')
+    browser.find_element(By.CSS_SELECTOR,
+                         'button.another[data-mode="account-login"]').click()
+    logging.info('successfully click the account password login method')
+    # 输入账号密码并点击登录
+    logging.info('entering the account and password and click the login')
+    browser.find_element(By.CSS_SELECTOR,
+                         'input#username.input.user').send_keys(
+        USERNAME)
+    browser.find_element(By.CSS_SELECTOR, 'input#password.input').send_keys(
+        PASSWORD)
+    (browser.find_element(By.CSS_SELECTOR, 'button.submit#accountLoginBtn')
+     .click())
+    logging.info('successfully login')
+    a = input("wait")
+
+
+def get_Cookies_and_put_in_request():
+    '''获取cookies并放入请求中'''
+    # 获取Cookies
+    cookies = browser.get_cookies()
+    # print('Cookies', cookies)
+    # 把Cookies放入请求中
+    session = requests.Session()
+    for cookie in cookies:
+        session.cookies.set(cookie['name'], cookie['value'])
+    return session
+
+
+def mysql_create_database(host, user, password, port):
+    '''
+    创建一个名为zujuanwangSpiders的数据库
+    '''
+    db = pymysql.connect(host=host, user=user, password=password, port=port)
+    cursor = db.cursor()
+    cursor.execute('SELECT VERSION()')
+    data = cursor.fetchone()
+    logging.info('Database version: {}'.format(data))
+    cursor.execute(
+        'CREATE DATABASE zujuanwangSpiders DEFAULT CHARACTER SET utf8mb4')
+    db.close()
+
+
+def mysql_create_table(host, user, password, port, db):
+    '''
+数据库结构：题库表：试题编号,科目，试题名称-----试题表：练习编号,试题编号，练习名称--
+----练习表：练习编号，练习文本，练习答案（练习为一套试题里的不同页面的练习）（以下命名遵循该顺序）
+    '''
+    db = pymysql.connect(host=host, user=user, password=password, port=port,
+                         db=db)
+    cursor = db.cursor()
+    sql = ('CREATE TABLE IF NOT EXISTS questionBank'
+           '(exampaper_id VARCHAR(255) NOT NULL,'
+           ' subject TEXT NOT NULL,'
+           ' examSetName TEXT NOT NULL,'
+           'PRIMARY KEY(exampaper_id))')
+    cursor.execute(sql)
+    sql = ('CREATE TABLE IF NOT EXISTS exampaperBank'
+           '(exampaper_id VARCHAR(255) NOT NULL,'
+           ' exercises_id VARCHAR(255) NOT NULL,'
+           ' exercises_name TEXT NOT NULL,'
+           ' PRIMARY KEY(exampaper_id))')
+    cursor.execute(sql)
+    sql = ('CREATE TABLE IF NOT EXISTS exercisesBank'
+           '(exercises_id VARCHAR(255) NOT NULL,'
+           ' exercises_text TEXT NOT NULL,'
+           ' exercise_answer TEXT NULL,'
+           ' PRIMARY KEY(exercises_id))')
+    cursor.execute(sql)
+    return cursor, db
+
+
+def match_text_url_id(detail_url, session, count_id):
+    '''
+    匹配试卷页的每一套练习的url和id
+    :param detail_url: 试卷页第一套练习的url
+    :return: 试卷页的每一套练习的url和练习id
+    '''
+    html = scrape_page(detail_url, session=session)  # 第一个练习的html
+    doc = pq(html)
+    a_s = doc(
+        'li[class~=tree-node][class~=tree-leaf] a').items()  # 所有包含URL和id的a元素
+    for a in a_s:
+        yield 'https://zujuan.xkw.com{}'.format(a.attr('href')), '{}{:0>6d}'.format(a.text(), count_id)
+
+
+
+def insert_table(data, table, db, cursor):
+    '''获取一个要插入的数据的字典和要插入的表名，插入对应的表单'''
+    keys = ','.join(data.keys())
+    values = ','.join(['%s'] * len(data))
+    sql = 'INSERT INTO {table}({keys}) VALUES({values})'.format(table=table,
+                                                                keys=keys,
+                                                                values=values)
+    try:
+        if cursor.execute(sql, tuple(data.values())):
+            logging.info("Successfully insert data into exercisesBank tables")
+            db.commit()
+    except:
+        logging.info("Failed insert data into exercisesBank tables")
+        db.rollback()
+
+
+def main():
+    browser_login()
+    session = get_Cookies_and_put_in_request()
+    time.sleep(10)
+    # 点击叉号去除广告
+    element_of_adverstisment = browser.find_element(By.CSS_SELECTOR,
+                                                    'a[data-type="closePop"]')
+    browser.execute_script("arguments[0].click();", element_of_adverstisment)
+    # 点击语文
+    element = browser.find_element(By.CSS_SELECTOR,
+                                   'a.item[data-subjectid="10"]')
+    browser.execute_script("arguments[0].click();", element)
+    logging.info('successfully click 语文')
+    time.sleep(10)
+    # 获取主页面HTML
+    main_html = browser.page_source
+    logging.info('successfully get main_html')
+    browser.close()
+    # 创建数据库
+    mysql_create_database('localhost', 'root', 'Dy032413', 3306)
+    cursor, db = mysql_create_table('localhost', 'root', 'Dy032413', 3306,
+                                    'zujuanwangSpiders')
+    # 获取试卷页的HTML,利用获取的试卷页的URL爬取对应的HTML代码
+    detail_urls = parse_detail(main_html)  # 从主页获得各个试卷的url，但只是该试卷的第一套练习的url
+    count_id = 1  # 用于防止主键重复
+    count_of_test = 0#用于测试，防止请求过多导致反爬机制升级
+    for detail_url in detail_urls:  # 进入试卷页
+        if count_of_test < 1:
+            sum_of_url_and_id = match_text_url_id(detail_url, session, count_id)
+            for test_url, test_id in sum_of_url_and_id:
+                if count_of_test < 1:
+                    test_html = scrape_page(test_url, session=session)
+                    test_text = match_data(test_html)
+                    data = {
+                        'exercises_id': '{}{:0>6d}'.format(test_id, count_id),
+                        'exercises_text': test_text
+                    }
+                    insert_table(data, 'exercisesBank', db, cursor)
+                    count_id += 1
+                    count_of_test += 1
+
+
+'''
+相当于每次for循环爬取一个练习，存储一个练习，所以获取练习id要和利用练习url爬取文本这两个for循环要在
+同一个等级，每次循环相应的生成器都前进一个位置，for detail_url in detail_urls这个相当于进入试卷页，
+但知识第一个练习，所以在这个for循环里面再循环，从而实现获取练习id要和利用练习url爬取文本这两个for循环要
+在同一个等级的想法,然后每爬取一个练习就存储一个练习
+'''
+'''
+获取主页html，爬取该试卷的第一套练习的url，获取该url对应的html，爬取练习url和练习id，返回，爬取
+练习url对应的html,匹配文本
+'''
+
+if __name__ == '__main__':
+    main()
